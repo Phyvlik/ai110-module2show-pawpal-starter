@@ -163,20 +163,24 @@ The scheduler uses a **greedy, first-fit algorithm**: it works through a sorted 
 
 **a. How you used AI**
 
-AI was used at every phase of this project, but in different modes:
+The most effective VS Code Copilot features for this project were:
 
-- **Design brainstorming (Phase 1):** I described the problem in plain English and asked AI to suggest classes, attributes, and relationships. The resulting UML draft gave me a solid starting structure in minutes instead of hours.
-- **Skeleton generation (Phase 1–2):** I used AI to convert the UML into Python dataclass stubs, which is mechanical work that is fast with AI but tedious by hand.
-- **Algorithm design (Phase 4):** I asked AI to suggest lightweight approaches for conflict detection and recurring task renewal. The `timedelta`-based next-occurrence pattern came from this conversation.
-- **Test generation (Phase 5):** I used AI to draft an initial test plan from a description of edge cases, then extended each test class to cover scenarios the AI missed (adjacent-but-not-overlapping tasks, non-recurring renewal error).
+- **Agent Mode** — used in Phase 2 and Phase 4 to generate full method implementations across multiple files at once. For example, asking Agent Mode to implement `sort_by_time()`, `filter_tasks()`, and `renew_recurring_tasks()` together, with awareness of the existing class structure, produced coherent code that matched the existing style without needing manual stitching.
+- **Inline Chat** — most useful for targeted, in-context edits: highlighting `_fit_tasks()` and asking "how should this skip tasks that exceed the time budget?" gave a focused answer without generating unrelated code.
+- **Copilot Chat with `#file:` references** — attaching `#file:pawpal_system.py` when asking for test ideas meant suggestions were grounded in the actual method signatures rather than generic patterns.
+- **Generate tests smart action** — gave a useful starting scaffold for `tests/test_pawpal.py`, which I then extended with edge cases the auto-generated tests missed.
 
-The most effective prompts were specific and scoped: "Given this method signature, what are three edge cases worth testing?" was far more useful than "write tests for my project."
+The most effective prompt style was narrow and specific: "Given this method signature, what are three edge cases worth testing?" consistently outperformed broad prompts like "write tests for my project."
 
 **b. Judgment and verification**
 
-When generating the Scheduler class, AI initially suggested placing scheduling logic directly on `Owner` as a `generate_plan()` method. I rejected this because it violated the single-responsibility principle — `Owner` should manage data, not run algorithms. I verified this was the right call by asking: "If I later want to swap the greedy algorithm for a smarter one, which design makes that easier?" The `Scheduler`-as-separate-class answer was clearly better.
+*Rejected suggestion:* When asking Copilot to generate the `Scheduler` class, it initially placed scheduling logic directly on `Owner` as a `generate_plan()` method. I rejected this because it violated the single-responsibility principle — `Owner` should own data, not run algorithms. I verified the right call by asking a follow-up: "If I later want to swap the greedy algorithm for constraint-satisfaction, which design makes that easier?" The separate `Scheduler` class answer was clearly better, and I kept it.
 
-I also modified AI-generated test code in two places: the AI wrote `assert len(result) > 0` for schedule output, which would pass even for a trivially broken scheduler. I replaced it with specific assertions about priority ordering and time bounds.
+*Modified suggestion:* Copilot's auto-generated tests used `assert len(result) > 0` to check schedule output. This would pass even if the scheduler returned garbage. I replaced it with specific assertions on priority ordering, start times, and time-window bounds.
+
+*Separate chat sessions:* Opening a new Copilot Chat for each phase (design, implementation, algorithms, testing) prevented context bleed — earlier conversations about class skeletons didn't pollute algorithm questions, and the testing session stayed focused on edge cases without re-explaining the whole system. It also made it easy to revisit any phase's conversation independently when debugging.
+
+*Being the lead architect:* The consistent lesson was that Copilot performs best as an implementer, not a designer. Every time I gave it a clear interface to fill in — a method signature, a data structure, a list of test conditions — the output was immediately usable. Every time I asked open-ended design questions without constraints, the output was generic and needed significant revision. Staying in the architect role — defining what the code should do before asking AI to write it — produced far better results than delegating the design itself.
 
 ---
 
