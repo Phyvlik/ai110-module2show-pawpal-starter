@@ -5,9 +5,10 @@ Run with:  python -m pytest
 """
 
 import pytest
+from datetime import date, timedelta
 from pawpal_system import (
     Owner, Pet, Task, Scheduler,
-    Priority, TimeOfDay, ScheduledTask,
+    Priority, TimeOfDay, Frequency, ScheduledTask,
 )
 
 
@@ -208,3 +209,235 @@ class TestScheduler:
         for st in scheduler.schedule:
             assert st.start_minute >= Scheduler.DEFAULT_START_MINUTE
             assert st.end_minute <= Scheduler.DEFAULT_END_MINUTE
+
+    def test_empty_pet_produces_no_schedule(self):
+        """A pet with no tasks should result in an empty schedule."""
+        owner = Owner("Jordan", available_minutes_per_day=120)
+        owner.add_pet(Pet(name="Ghost", species="cat"))
+        scheduler = Scheduler(owner)
+        result = scheduler.generate_schedule()
+        assert result == []
+
+    def test_owner_with_no_pets_produces_no_schedule(self):
+        """An owner with no pets should produce an empty schedule."""
+        owner = Owner("Jordan", available_minutes_per_day=120)
+        scheduler = Scheduler(owner)
+        result = scheduler.generate_schedule()
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Sorting tests
+# ---------------------------------------------------------------------------
+
+class TestSorting:
+    def test_sort_by_time_returns_chronological_order(self, owner_with_pets):
+        """sort_by_time() must return slots ordered earliest start first."""
+        scheduler = Scheduler(owner_with_pets)
+        scheduler.generate_schedule()
+        sorted_slots = scheduler.sort_by_time()
+        start_times = [st.start_minute for st in sorted_slots]
+        assert start_times == sorted(start_times)
+
+    def test_sort_by_time_is_stable_for_single_task(self, sample_pet, sample_task):
+        """A schedule with one task should sort to a list of one item."""
+        owner = Owner("Jordan", available_minutes_per_day=120)
+        sample_pet.add_task(sample_task)
+        owner.add_pet(sample_pet)
+        scheduler = Scheduler(owner)
+        scheduler.generate_schedule()
+        assert len(scheduler.sort_by_time()) == 1
+
+    def test_high_priority_before_low_in_generated_order(self, owner_with_pets):
+        """High-priority tasks must be placed before low-priority ones."""
+        scheduler = Scheduler(owner_with_pets)
+        scheduler.generate_schedule()
+        priorities = [st.task.priority for st in scheduler.schedule]
+        high_indices = [i for i, p in enumerate(priorities) if p == Priority.HIGH]
+        low_indices  = [i for i, p in enumerate(priorities) if p == Priority.LOW]
+        if high_indices and low_indices:
+            assert max(high_indices) < min(low_indices)
+
+
+# ---------------------------------------------------------------------------
+# Recurrence tests
+# ---------------------------------------------------------------------------
+
+class TestRecurrence:
+    def test_daily_next_occurrence_is_tomorrow(self):
+        """create_next_occurrence() for a daily task should be due tomorrow."""
+        today = date.today()
+        task = Task(
+            title="Walk",
+            duration_minutes=20,
+            recurring=True,
+            frequency=Frequency.DAILY,
+            due_date=today,
+        )
+        next_task = task.create_next_occurrence()
+        assert next_task.due_date == today + timedelta(days=1)
+
+    def test_weekly_next_occurrence_is_next_week(self):
+        """create_next_occurrence() for a weekly task should be due in 7 days."""
+        today = date.today()
+        task = Task(
+            title="Bath",
+            duration_minutes=30,
+            recurring=True,
+            frequency=Frequency.WEEKLY,
+            due_date=today,
+        )
+        next_task = task.create_next_occurrence()
+        assert next_task.due_date == today + timedelta(days=7)
+
+    def test_next_occurrence_starts_incomplete(self):
+        """The renewed task must not carry over the completed flag."""
+        task = Task(title="Meds", duration_minutes=5, recurring=True, frequency=Frequency.DAILY)
+        task.mark_complete()
+        next_task = task.create_next_occurrence()
+        assert next_task.completed is False
+
+    def test_next_occurrence_preserves_task_attributes(self):
+        """Title, duration, priority, and category must be copied to the new occurrence."""
+        task = Task(
+            title="Flea meds",
+            duration_minutes=5,
+            priority=Priority.HIGH,
+            category="meds",
+            recurring=True,
+            frequency=Frequency.DAILY,
+        )
+        next_task = task.create_next_occurrence()
+        assert next_task.title == task.title
+        assert next_task.duration_minutes == task.duration_minutes
+        assert next_task.priority == task.priority
+        assert next_task.category == task.category
+
+    def test_non_recurring_task_raises_on_renewal(self):
+        """create_next_occurrence() must raise ValueError for non-recurring tasks."""
+        task = Task(title="One-off groom", duration_minutes=15, recurring=False)
+        with pytest.raises(ValueError):
+            task.create_next_occurrence()
+
+    def test_renew_recurring_tasks_returns_correct_count(self, owner_with_pets):
+        """renew_recurring_tasks() should return one item per completed recurring task."""
+        scheduler = Scheduler(owner_with_pets)
+        scheduler.generate_schedule()
+
+        # Mark all recurring tasks in the schedule complete
+        recurring_slots = [st for st in scheduler.schedule if st.task.recurring]
+        for st in recurring_slots:
+            st.task.mark_complete()
+
+        renewed = scheduler.renew_recurring_tasks()
+        assert len(renewed) == len(recurring_slots)
+
+    def test_renew_returns_empty_when_nothing_completed(self, owner_with_pets):
+        """renew_recurring_tasks() should return [] if no tasks are completed."""
+        scheduler = Scheduler(owner_with_pets)
+        scheduler.generate_schedule()
+        assert scheduler.renew_recurring_tasks() == []
+
+    def test_due_date_defaults_to_today_when_none(self):
+        """When due_date is None, create_next_occurrence() bases the date on today."""
+        today = date.today()
+        task = Task(title="Walk", duration_minutes=20, recurring=True, frequency=Frequency.DAILY)
+        next_task = task.create_next_occurrence()
+        assert next_task.due_date == today + timedelta(days=1)
+
+
+# ---------------------------------------------------------------------------
+# Conflict detection tests
+# ---------------------------------------------------------------------------
+
+class TestConflictDetection:
+    def test_normal_schedule_has_no_conflicts(self, owner_with_pets):
+        """Sequentially placed tasks must never overlap."""
+        scheduler = Scheduler(owner_with_pets)
+        scheduler.generate_schedule()
+        assert scheduler.detect_conflicts() == []
+
+    def test_identical_start_times_detected_as_conflict(self, owner_with_pets):
+        """Two tasks starting at the same minute must be flagged."""
+        scheduler = Scheduler(owner_with_pets)
+        scheduler.generate_schedule()
+        pet = owner_with_pets.pets[0]
+        extra = Task("Emergency vet", duration_minutes=10, priority=Priority.HIGH)
+        scheduler.add_fixed_task(pet, extra, start_minute=Scheduler.DEFAULT_START_MINUTE)
+        assert len(scheduler.detect_conflicts()) >= 1
+
+    def test_overlapping_tasks_detected(self, sample_pet):
+        """Tasks whose windows overlap (not just same start) must be detected."""
+        owner = Owner("Jordan", available_minutes_per_day=120)
+        t1 = Task("Task A", duration_minutes=30)
+        t2 = Task("Task B", duration_minutes=30)
+        owner.add_pet(sample_pet)
+        scheduler = Scheduler(owner)
+        # Manually place two overlapping slots
+        scheduler.add_fixed_task(sample_pet, t1, start_minute=480)   # 08:00–08:30
+        scheduler.add_fixed_task(sample_pet, t2, start_minute=500)   # 08:20–08:50
+        conflicts = scheduler.detect_conflicts()
+        assert len(conflicts) == 1
+        assert conflicts[0] == (scheduler.schedule[0], scheduler.schedule[1])
+
+    def test_adjacent_tasks_not_flagged_as_conflict(self, sample_pet):
+        """Tasks that touch (end == next start) must NOT be flagged."""
+        owner = Owner("Jordan", available_minutes_per_day=120)
+        t1 = Task("Task A", duration_minutes=30)
+        t2 = Task("Task B", duration_minutes=30)
+        owner.add_pet(sample_pet)
+        scheduler = Scheduler(owner)
+        scheduler.add_fixed_task(sample_pet, t1, start_minute=480)   # 08:00–08:30
+        scheduler.add_fixed_task(sample_pet, t2, start_minute=510)   # 08:30–09:00
+        assert scheduler.detect_conflicts() == []
+
+
+# ---------------------------------------------------------------------------
+# Filtering tests
+# ---------------------------------------------------------------------------
+
+class TestFiltering:
+    def test_filter_by_pet_name(self, owner_with_pets):
+        """filter_tasks(pet_name=) should only return that pet's tasks."""
+        scheduler = Scheduler(owner_with_pets)
+        results = scheduler.filter_tasks(pet_name="Mochi")
+        assert all(pet.name == "Mochi" for pet, _ in results)
+
+    def test_filter_by_pet_name_case_insensitive(self, owner_with_pets):
+        """Pet name filter should be case-insensitive."""
+        scheduler = Scheduler(owner_with_pets)
+        lower = scheduler.filter_tasks(pet_name="mochi")
+        upper = scheduler.filter_tasks(pet_name="MOCHI")
+        assert len(lower) == len(upper)
+
+    def test_filter_completed_false(self, owner_with_pets):
+        """filter_tasks(completed=False) should exclude completed tasks."""
+        scheduler = Scheduler(owner_with_pets)
+        scheduler.generate_schedule()
+        # Mark one task complete
+        owner_with_pets.pets[0].tasks[0].mark_complete()
+        incomplete = scheduler.filter_tasks(completed=False)
+        assert all(not t.completed for _, t in incomplete)
+
+    def test_filter_completed_true(self, owner_with_pets):
+        """filter_tasks(completed=True) should return only completed tasks."""
+        scheduler = Scheduler(owner_with_pets)
+        owner_with_pets.pets[0].tasks[0].mark_complete()
+        done = scheduler.filter_tasks(completed=True)
+        assert len(done) == 1
+        assert done[0][1].completed is True
+
+    def test_filter_no_match_returns_empty(self, owner_with_pets):
+        """Filtering by a non-existent pet name should return an empty list."""
+        scheduler = Scheduler(owner_with_pets)
+        assert scheduler.filter_tasks(pet_name="NoSuchPet") == []
+
+    def test_filter_combined_pet_and_status(self, owner_with_pets):
+        """Combining pet_name and completed filters should intersect both."""
+        scheduler = Scheduler(owner_with_pets)
+        # Mark Luna's first task complete
+        luna = owner_with_pets.get_pet("Luna")
+        luna.tasks[0].mark_complete()
+        results = scheduler.filter_tasks(pet_name="Luna", completed=True)
+        assert len(results) == 1
+        assert results[0][0].name == "Luna"

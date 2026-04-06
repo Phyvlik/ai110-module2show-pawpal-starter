@@ -32,6 +32,29 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+## Testing PawPal+
+
+Run the full test suite with:
+
+```bash
+python -m pytest
+```
+
+The suite contains **47 tests** across five areas:
+
+| Area | What is tested |
+|---|---|
+| `Task` | `mark_complete()`, `is_high_priority()`, default field values |
+| `Pet` | Adding/removing tasks, priority sorting, care-time totals |
+| `Owner` | Pet registration, case-insensitive lookup, time-budget check |
+| `Scheduler` | Schedule generation, time-window enforcement, `explain_plan()` |
+| `TestSorting` | Chronological order from `sort_by_time()`, priority ordering |
+| `TestRecurrence` | Daily/weekly `create_next_occurrence()` using `timedelta`, `renew_recurring_tasks()`, edge cases |
+| `TestConflictDetection` | Overlapping slots flagged, adjacent slots not flagged, identical start times caught |
+| `TestFiltering` | Filter by pet name, by completion status, and combined filters |
+
+**Confidence level: 5/5** — all happy paths and key edge cases (empty pets, no-time budget, adjacent vs overlapping tasks, non-recurring renewal error) are covered and passing.
+
 ## Smarter Scheduling
 
 PawPal+ goes beyond a simple task list with four algorithmic features:
