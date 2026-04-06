@@ -47,14 +47,20 @@ class Task:
     preferred_time: TimeOfDay = TimeOfDay.ANYTIME
     recurring: bool = False             # True → repeats every day
     notes: str = ""
+    completed: bool = False
+
+    def mark_complete(self) -> None:
+        """Mark this task as completed."""
+        self.completed = True
 
     def is_high_priority(self) -> bool:
         """Return True if this task has high priority."""
         return self.priority == Priority.HIGH
 
     def __str__(self) -> str:
+        status = "done" if self.completed else "    "
         return (
-            f"[{self.priority.value.upper()}] {self.title} "
+            f"[{status}][{self.priority.value.upper()}] {self.title} "
             f"({self.duration_minutes} min, {self.preferred_time.value})"
         )
 
@@ -191,8 +197,8 @@ class ScheduledTask:
 
     def __str__(self) -> str:
         return (
-            f"{self.start_time_str()}–{self.end_time_str()} | "
-            f"{self.pet.name}: {self.task.title} — {self.reason}"
+            f"{self.start_time_str()}-{self.end_time_str()} | "
+            f"{self.pet.name}: {self.task.title} - {self.reason}"
         )
 
 
