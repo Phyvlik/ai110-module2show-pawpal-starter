@@ -24,7 +24,7 @@ Your final app should:
 
 ## Demo
 
-<a href="/course_images/ai110/image.png" target="_blank"><img src='/course_images/ai110/image.png' title='PawPal App' width='' alt='PawPal App' class='center-block' /></a>
+![PawPal App](image.png)
 
 ## Features
 
