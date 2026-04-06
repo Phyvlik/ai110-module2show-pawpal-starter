@@ -22,6 +22,18 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## Features
+
+- **Owner + multi-pet management** — register any number of pets with species, breed, age, and special needs
+- **Flexible task creation** — set title, duration, priority (low/medium/high), preferred time of day, category, and notes
+- **Priority-first scheduling** — high-priority tasks (meds, feeding) are always placed first; lower-priority tasks fill remaining time
+- **Recurring task renewal** — daily and weekly tasks auto-generate their next occurrence (using Python `timedelta`) when marked complete
+- **Conflict detection** — the scheduler scans for overlapping time windows and surfaces a clear warning, rather than crashing
+- **Time-based sorting** — the generated plan is displayed sorted chronologically (earliest first)
+- **Task filtering** — view tasks by pet and/or completion status without regenerating the schedule
+- **Plain-English reasoning** — every scheduled slot explains why it was chosen (priority, preferred time, recurring flag)
+- **47-test automated suite** — full pytest coverage across all classes and edge cases
+
 ## Getting started
 
 ### Setup

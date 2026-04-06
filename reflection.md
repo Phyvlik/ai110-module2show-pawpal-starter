@@ -31,6 +31,13 @@ classDiagram
         ANYTIME
     }
 
+    class Frequency {
+        <<enumeration>>
+        ONCE
+        DAILY
+        WEEKLY
+    }
+
     class Task {
         +str title
         +int duration_minutes
@@ -38,7 +45,12 @@ classDiagram
         +str category
         +TimeOfDay preferred_time
         +bool recurring
+        +Frequency frequency
+        +date due_date
         +str notes
+        +bool completed
+        +mark_complete() None
+        +create_next_occurrence() Task
         +is_high_priority() bool
     }
 
@@ -82,7 +94,11 @@ classDiagram
         +Owner owner
         +list~ScheduledTask~ schedule
         +generate_schedule() list~ScheduledTask~
+        +sort_by_time() list~ScheduledTask~
+        +filter_tasks(pet_name, completed) list~tuple~
         +detect_conflicts() list~tuple~
+        +add_fixed_task(pet, task, start_minute) ScheduledTask
+        +renew_recurring_tasks() list~Task~
         +explain_plan() str
         -_sort_tasks() list~tuple~
         -_fit_tasks(sorted_tasks) list~ScheduledTask~
@@ -93,6 +109,7 @@ classDiagram
     Pet "1" o-- "0..*" Task : has
     Task --> Priority : uses
     Task --> TimeOfDay : prefers
+    Task --> Frequency : repeats on
     Owner --> TimeOfDay : prefers
     Scheduler --> Owner : plans for
     Scheduler "1" *-- "0..*" ScheduledTask : produces
@@ -146,13 +163,20 @@ The scheduler uses a **greedy, first-fit algorithm**: it works through a sorted 
 
 **a. How you used AI**
 
-- How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
-- What kinds of prompts or questions were most helpful?
+AI was used at every phase of this project, but in different modes:
+
+- **Design brainstorming (Phase 1):** I described the problem in plain English and asked AI to suggest classes, attributes, and relationships. The resulting UML draft gave me a solid starting structure in minutes instead of hours.
+- **Skeleton generation (Phase 1–2):** I used AI to convert the UML into Python dataclass stubs, which is mechanical work that is fast with AI but tedious by hand.
+- **Algorithm design (Phase 4):** I asked AI to suggest lightweight approaches for conflict detection and recurring task renewal. The `timedelta`-based next-occurrence pattern came from this conversation.
+- **Test generation (Phase 5):** I used AI to draft an initial test plan from a description of edge cases, then extended each test class to cover scenarios the AI missed (adjacent-but-not-overlapping tasks, non-recurring renewal error).
+
+The most effective prompts were specific and scoped: "Given this method signature, what are three edge cases worth testing?" was far more useful than "write tests for my project."
 
 **b. Judgment and verification**
 
-- Describe one moment where you did not accept an AI suggestion as-is.
-- How did you evaluate or verify what the AI suggested?
+When generating the Scheduler class, AI initially suggested placing scheduling logic directly on `Owner` as a `generate_plan()` method. I rejected this because it violated the single-responsibility principle — `Owner` should manage data, not run algorithms. I verified this was the right call by asking: "If I later want to swap the greedy algorithm for a smarter one, which design makes that easier?" The `Scheduler`-as-separate-class answer was clearly better.
+
+I also modified AI-generated test code in two places: the AI wrote `assert len(result) > 0` for schedule output, which would pass even for a trivially broken scheduler. I replaced it with specific assertions about priority ordering and time bounds.
 
 ---
 
@@ -160,13 +184,27 @@ The scheduler uses a **greedy, first-fit algorithm**: it works through a sorted 
 
 **a. What you tested**
 
-- What behaviors did you test?
-- Why were these tests important?
+The 47-test suite covers eight behavioral areas:
+
+- **Task:** `mark_complete()` correctness, idempotency, default field values, priority flag
+- **Pet:** add/remove task count changes, priority sort order, duration totals
+- **Owner:** pet registration, case-insensitive lookup, time-budget arithmetic
+- **Scheduler:** schedule generation, time-window enforcement, `explain_plan()` output
+- **Sorting:** `sort_by_time()` returns chronological order; high priority appears before low in the generated sequence
+- **Recurrence:** daily and weekly `create_next_occurrence()` produces correct `due_date` via `timedelta`; renewed tasks start with `completed=False`; non-recurring tasks raise `ValueError`; `renew_recurring_tasks()` returns the right count
+- **Conflict detection:** overlapping windows flagged; adjacent windows (end == next start) not flagged; identical start times caught
+- **Filtering:** by pet name (case-insensitive), by completion status, combined filters, no-match returns empty list
+
+These tests mattered because the scheduler's correctness is invisible to the user — a silent bug (wrong sort order, missed conflict) would produce a bad schedule with no error message.
 
 **b. Confidence**
 
-- How confident are you that your scheduler works correctly?
-- What edge cases would you test next if you had more time?
+Confidence: **5/5** for the core behaviors tested. The suite covers all happy paths and the edge cases that were most likely to hide bugs (adjacent vs overlapping, recurring vs one-off, empty owner).
+
+Edge cases to test next with more time:
+- Tasks whose `duration_minutes` exactly equals the remaining budget (boundary condition on `_fit_tasks`)
+- An owner with 10+ pets and 50+ tasks to verify the greedy algorithm's performance doesn't degrade noticeably
+- Recurring weekly tasks whose `due_date` spans a month boundary
 
 ---
 
@@ -174,12 +212,14 @@ The scheduler uses a **greedy, first-fit algorithm**: it works through a sorted 
 
 **a. What went well**
 
-- What part of this project are you most satisfied with?
+The separation between the logic layer (`pawpal_system.py`) and the UI (`app.py`) worked very well. Because all business rules lived in pure Python classes with no Streamlit dependency, I could test them entirely in pytest without needing a browser. When the UI was wired up in Phase 3, it connected cleanly — the app became a thin shell over already-verified logic. This also made the Phase 4 algorithm additions safe: I could extend `Scheduler` and immediately test the new methods in isolation.
 
 **b. What you would improve**
 
-- If you had another iteration, what would you improve or redesign?
+The `Scheduler` currently rebuilds the entire schedule from scratch every time `generate_schedule()` is called — it has no memory of previous runs. In a real app, this means a user marking a task complete does not automatically update the displayed schedule. I would redesign `Scheduler` to hold mutable state (a running schedule that can be patched) and expose a `mark_done(title)` method that removes the task and optionally queues the next occurrence.
+
+I would also replace the `st.table()` displays in the UI with `st.dataframe()` to allow sorting and filtering directly in the browser without a page reload.
 
 **c. Key takeaway**
 
-- What is one important thing you learned about designing systems or working with AI on this project?
+The most important thing I learned is that AI is most useful when you already have a clear design intention. When I asked vague questions ("build me a scheduler"), the output was generic. When I asked precise questions ("given this `_fit_tasks` signature, write a helper that places a task at a fixed minute regardless of the cursor"), the output was immediately usable. Acting as the lead architect — defining the structure first, then delegating the mechanical implementation — produced far better results than letting AI drive the design from scratch.
