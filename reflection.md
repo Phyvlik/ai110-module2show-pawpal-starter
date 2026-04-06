@@ -124,13 +124,21 @@ During design I initially considered putting scheduling logic directly on `Owner
 
 **a. Constraints and priorities**
 
-- What constraints does your scheduler consider (for example: time, priority, preferences)?
-- How did you decide which constraints mattered most?
+The scheduler considers three constraints, applied in this order:
+
+1. **Priority** (high → medium → low) — A missed high-priority task (medication, feeding) has real consequences for the pet's health, so it is always placed first.
+2. **Preferred time of day** — Tasks that match the owner's preferred schedule slot are ranked above equally-prioritized tasks that don't. This respects owner routine without making it a hard constraint.
+3. **Available time budget** — The scheduler tracks a running total of minutes used and skips any task that would exceed the owner's daily limit. Tasks are never split across days.
+
+Priority was chosen as the primary constraint because a pet care app must guarantee health-critical tasks are done first; time preference is a quality-of-life concern that yields to necessity.
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+The scheduler uses a **greedy, first-fit algorithm**: it works through a sorted task list and places each task immediately after the previous one, skipping only tasks that would exceed the day's time limit. It does not backtrack.
+
+*Tradeoff:* A low-priority 5-minute task placed early in the day cannot be "bumped" later if a high-priority 60-minute task appears that would have fit in the same slot. The greedy order (high-priority first) mitigates this, but it means the schedule is not globally optimal — a constraint-satisfaction or dynamic-programming approach would produce a tighter packing.
+
+*Why it is reasonable:* For a pet care app with a handful of tasks per day, the greedy result is virtually always acceptable. The added complexity of backtracking or LP-solving would confuse the codebase without benefiting the typical user.
 
 ---
 

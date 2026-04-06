@@ -10,7 +10,9 @@ Classes:
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from enum import Enum
 from typing import Optional
 
@@ -32,6 +34,13 @@ class TimeOfDay(str, Enum):
     ANYTIME = "anytime"
 
 
+class Frequency(str, Enum):
+    """How often a recurring task repeats."""
+    ONCE = "once"
+    DAILY = "daily"
+    WEEKLY = "weekly"
+
+
 # ---------------------------------------------------------------------------
 # Task
 # ---------------------------------------------------------------------------
@@ -45,13 +54,31 @@ class Task:
     priority: Priority = Priority.MEDIUM
     category: str = "general"          # e.g. "walk", "feeding", "meds", "grooming"
     preferred_time: TimeOfDay = TimeOfDay.ANYTIME
-    recurring: bool = False             # True → repeats every day
+    recurring: bool = False             # True → repeats on the given frequency
+    frequency: Frequency = Frequency.DAILY  # only meaningful when recurring=True
+    due_date: date | None = None        # date this task is due (None = today)
     notes: str = ""
     completed: bool = False
 
     def mark_complete(self) -> None:
         """Mark this task as completed."""
         self.completed = True
+
+    def create_next_occurrence(self) -> "Task":
+        """Return a fresh copy of this recurring task scheduled for its next due date.
+
+        Uses timedelta to advance the due date by 1 day (daily) or 7 days (weekly).
+        Raises ValueError if called on a non-recurring task.
+        """
+        if not self.recurring:
+            raise ValueError(f"Task '{self.title}' is not recurring.")
+
+        delta = timedelta(days=1 if self.frequency == Frequency.DAILY else 7)
+        base = self.due_date if self.due_date else date.today()
+        next_task = copy.copy(self)
+        next_task.completed = False
+        next_task.due_date = base + delta
+        return next_task
 
     def is_high_priority(self) -> bool:
         """Return True if this task has high priority."""
@@ -262,11 +289,58 @@ class Scheduler:
 
         conflicts = self.detect_conflicts()
         if conflicts:
-            lines.append(f"\n⚠ {len(conflicts)} conflict(s) detected:")
+            lines.append(f"\n[!] {len(conflicts)} conflict(s) detected:")
             for a, b in conflicts:
-                lines.append(f"  • {a.task.title} overlaps with {b.task.title}")
+                lines.append(f"  - {a.task.title} overlaps with {b.task.title}")
 
         return "\n".join(lines)
+
+    def sort_by_time(self) -> list[ScheduledTask]:
+        """Return the current schedule sorted by start time (earliest first)."""
+        return sorted(self.schedule, key=lambda st: st.start_minute)
+
+    def filter_tasks(
+        self,
+        pet_name: Optional[str] = None,
+        completed: Optional[bool] = None,
+    ) -> list[tuple[Pet, Task]]:
+        """Filter all owner tasks by pet name and/or completion status.
+
+        Args:
+            pet_name:  If given, only include tasks belonging to that pet (case-insensitive).
+            completed: If given, only include tasks whose completed field matches.
+
+        Returns:
+            List of (Pet, Task) pairs that pass all specified filters.
+        """
+        results = self.owner.all_tasks()
+        if pet_name is not None:
+            results = [(p, t) for p, t in results if p.name.lower() == pet_name.lower()]
+        if completed is not None:
+            results = [(p, t) for p, t in results if t.completed == completed]
+        return results
+
+    def add_fixed_task(self, pet: Pet, task: Task, start_minute: int) -> ScheduledTask:
+        """Place a task at a specific start time regardless of the current cursor.
+
+        Useful for testing conflict detection or manually pinning a task to a time.
+        """
+        reason = self._build_reason(task)
+        st = ScheduledTask(pet=pet, task=task, start_minute=start_minute, reason=reason)
+        self.schedule.append(st)
+        return st
+
+    def renew_recurring_tasks(self) -> list[Task]:
+        """Find completed recurring tasks in the schedule and generate their next occurrences.
+
+        Returns a list of new Task objects (one per completed recurring task) ready to be
+        added back to their pet for the next day.
+        """
+        renewed: list[Task] = []
+        for st in self.schedule:
+            if st.task.completed and st.task.recurring:
+                renewed.append(st.task.create_next_occurrence())
+        return renewed
 
     # ------------------------------------------------------------------
     # Internal helpers
